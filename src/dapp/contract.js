@@ -56,4 +56,51 @@ export default class Contract {
         callback(error, payload);
       });
   }
+
+  purchaseFlight({ airline, flight, amount }, callback) {
+    let self = this;
+
+    self.flightSuretyApp.methods
+      .purchaseFlight(airline, flight)
+      .send({ from: self.owner, amount }, callback);
+  }
+
+  async registerAirline({ airline }, callback) {
+    let self = this;
+
+    const results = await self.flightSuretyApp.methods
+      .registerAirline(airline)
+      .call({ from: self.owner })
+      .catch((error) => callback(error));
+
+    if (results.success) {
+      self.flightSuretyApp.methods
+        .registerAirline(airline)
+        .send({ from: self.owner }, callback);
+    } else {
+      callback(`Waiting for votes on ${airline}`);
+    }
+  }
+
+  voteAirline({ airlineFrom, airlineTo }, callback) {
+    let self = this;
+
+    self.flightSuretyApp.methods
+      .voteAirline(airlineTo)
+      .send({ from: airlineFrom }, callback);
+  }
+
+  getFlightCount({}, callback) {
+    let self = this;
+
+    self.flightSuretyApp.methods
+      .getFlightCount()
+      .call({ from: self.owner }, callback);
+  }
+
+  listenToEvents() {
+    var subscription = web3.eth.subscribe("*", {}, function (error, result) {
+      if (!error) console.log(result);
+    });
+  }
 }

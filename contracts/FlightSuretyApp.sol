@@ -6,6 +6,8 @@ pragma solidity ^0.4.25;
 
 import "../node_modules/openzeppelin-solidity/contracts/math/SafeMath.sol";
 
+import "./FlightSuretyData.sol";
+
 /************************************************** */
 /* FlightSurety Smart Contract                      */
 /************************************************** */
@@ -15,6 +17,8 @@ contract FlightSuretyApp {
     /********************************************************************************************/
     /*                                       DATA VARIABLES                                     */
     /********************************************************************************************/
+
+    FlightSuretyData private data = new FlightSuretyData();
 
     // Flight status codees
     uint8 private constant STATUS_CODE_UNKNOWN = 0;
@@ -32,7 +36,7 @@ contract FlightSuretyApp {
         uint256 updatedTimestamp;
         address airline;
     }
-    mapping(bytes32 => Flight) private flights;
+    mapping(string => Flight) private flights;
 
     /********************************************************************************************/
     /*                                       FUNCTION MODIFIERS                                 */
@@ -60,6 +64,19 @@ contract FlightSuretyApp {
         _;
     }
 
+    modifier requireIsAirlineRegistered(address airline) {
+        require(data.isAirline(airline), "Airline not registered");
+        _;
+    }
+
+    modifier checkValue() {
+        require(msg.value >= 0, "Should have sufficient ether");
+        if (msg.value > 1 ether) {
+            msg.sender.transfer(msg.value - 1 ether);
+        }
+        _;
+    }
+
     /********************************************************************************************/
     /*                                       CONSTRUCTOR                                        */
     /********************************************************************************************/
@@ -68,16 +85,17 @@ contract FlightSuretyApp {
      * @dev Contract constructor
      *
      */
-    constructor() public {
+    constructor(address airline) public {
         contractOwner = msg.sender;
+        data.registerAirline(airline);
     }
 
     /********************************************************************************************/
     /*                                       UTILITY FUNCTIONS                                  */
     /********************************************************************************************/
 
-    function isOperational() public pure returns (bool) {
-        return true; // Modify to call data contract's status
+    function isOperational() public view returns (bool) {
+        return data.isOperational();
     }
 
     /********************************************************************************************/
@@ -88,19 +106,60 @@ contract FlightSuretyApp {
      * @dev Add an airline to the registration queue
      *
      */
-    function registerAirline()
+    function registerAirline(address airline)
         external
-        pure
+        payable
         returns (bool success, uint256 votes)
     {
-        return (success, 0);
+        require(!data.isAirline(airline), "Is already an airline");
+
+        if (data.airlineCount() < 4) {
+            data.registerAirline(airline);
+            return (true, 0);
+        } else if (data.airlineVotes(airline) > data.airlineCount() / 2) {
+            data.registerAirline(airline);
+            return (true, data.airlineVotes(airline));
+        }
+
+        return (false, data.airlineVotes(airline));
+    }
+
+    /**
+     * @dev Vote for an airline
+     *
+     */
+    function voteAirline(address airline)
+        external
+        payable
+        requireIsAirlineRegistered(msg.sender)
+    {
+        data.voteAirline(airline);
     }
 
     /**
      * @dev Register a future flight for insuring.
      *
      */
-    function registerFlight() external pure {}
+    function registerFlight(address airline, string flight) external {
+        flights[flight] = Flight({
+            isRegistered: true,
+            statusCode: STATUS_CODE_UNKNOWN,
+            updatedTimestamp: now,
+            airline: airline
+        });
+    }
+
+    function purchaseFlight(address airline, string flight)
+        external
+        requireIsAirlineRegistered(airline)
+        checkValue
+    {
+        data.buy(flight);
+    }
+
+    function getFlightCount() external view returns (uint256) {
+        return data.getAirlines();
+    }
 
     /**
      * @dev Called after oracle has updated flight status
@@ -111,7 +170,10 @@ contract FlightSuretyApp {
         string memory flight,
         uint256 timestamp,
         uint8 statusCode
-    ) internal pure {}
+    ) internal requireIsAirlineRegistered(airline) {
+        flights[flight].updatedTimestamp = timestamp;
+        flights[flight].statusCode = statusCode;
+    }
 
     // Generate a request for oracles to fetch flight information
     function fetchFlightStatus(
@@ -142,7 +204,7 @@ contract FlightSuretyApp {
     uint256 public constant REGISTRATION_FEE = 1 ether;
 
     // Number of oracles that must respond for valid status
-    uint256 private constant MIN_RESPONSES = 3;
+    uint256 private constant MIN_RESPONSES = 1;
 
     struct Oracle {
         bool isRegistered;
@@ -219,7 +281,7 @@ contract FlightSuretyApp {
         string flight,
         uint256 timestamp,
         uint8 statusCode
-    ) external {
+    ) external payable {
         require(
             (oracles[msg.sender].indexes[0] == index) ||
                 (oracles[msg.sender].indexes[1] == index) ||

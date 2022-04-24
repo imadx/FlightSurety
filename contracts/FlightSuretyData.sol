@@ -12,6 +12,21 @@ contract FlightSuretyData {
     address private contractOwner; // Account used to deploy contract
     bool private operational = true; // Blocks all state changes throughout the contract if false
 
+    mapping(address => bool) private authorizedCallers;
+
+    uint256 public airlineCount;
+
+    mapping(address => bool) private airlines;
+    mapping(address => uint256) public airlineVotes;
+    mapping(address => mapping(address => bool)) private airlineVoteLog;
+
+    mapping(string => bool) private flights;
+    mapping(string => address[]) private flightPurchases;
+    mapping(string => mapping(address => uint256))
+        private flightPurchasesAmount;
+    mapping(address => uint256) private flightPurchaseRefunds;
+    mapping(string => uint256) private flightFunds;
+
     /********************************************************************************************/
     /*                                       EVENT DEFINITIONS                                  */
     /********************************************************************************************/
@@ -71,6 +86,18 @@ contract FlightSuretyData {
         operational = mode;
     }
 
+    function authorizeCaller(address caller) external requireContractOwner {
+        authorizedCallers[caller] = true;
+    }
+
+    function isAirline(address airline) external view returns (bool) {
+        return airlines[airline];
+    }
+
+    function getAirlines() external view returns (uint256) {
+        return airlineCount;
+    }
+
     /********************************************************************************************/
     /*                                     SMART CONTRACT FUNCTIONS                             */
     /********************************************************************************************/
@@ -80,31 +107,56 @@ contract FlightSuretyData {
      *      Can only be called from FlightSuretyApp contract
      *
      */
-    function registerAirline() external pure {}
+    function registerAirline(address airline) external {
+        airlines[airline] = true;
+        airlineCount += 1;
+    }
+
+    function voteAirline(address airline) external {
+        require(
+            airlineVoteLog[msg.sender][airline] == false,
+            "This airline has already voted"
+        );
+
+        airlineVoteLog[msg.sender][airline] = true;
+        airlineVotes[airline] += 1;
+    }
 
     /**
      * @dev Buy insurance for a flight
      *
      */
-    function buy() external payable {}
+    function buy(string flight) external payable {
+        flightPurchases[flight].push(msg.sender);
+        flightPurchasesAmount[flight][msg.sender] = msg.value;
+    }
 
     /**
      *  @dev Credits payouts to insurees
      */
-    function creditInsurees() external pure {}
+    function creditInsurees() external {
+        flightPurchaseRefunds[msg.sender] = SafeMath.div(
+            SafeMath.mul(flightPurchaseRefunds[msg.sender], 3),
+            2
+        );
+    }
 
     /**
      *  @dev Transfers eligible payout funds to insuree
      *
      */
-    function pay() external pure {}
+    function pay() external {
+        msg.sender.transfer(flightPurchaseRefunds[msg.sender]);
+    }
 
     /**
      * @dev Initial funding for the insurance. Unless there are too many delayed flights
      *      resulting in insurance payouts, the contract should be self-sustaining
      *
      */
-    function fund() public payable {}
+    function fund() public payable {
+        flightFunds["default"] = msg.value;
+    }
 
     function getFlightKey(
         address airline,
